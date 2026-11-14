@@ -12,12 +12,13 @@
 - **輸出 WAV**：保留原本的聲道數（16-bit PCM）；多個結果可以打包下載
 - **格式**：MP3、M4A、WAV、FLAC、OGG……瀏覽器播得了的都解得開（用內建的 `decodeAudioData`）
 
-## 和 ZIP 編輯器串接
+## 和其他工具串接
 
 工具都放在 `mason276752.github.io` 底下，屬於同一個 origin，可以用 [BroadcastChannel](https://developer.mozilla.org/docs/Web/API/BroadcastChannel) 互傳檔案：
 
 - 在 [ZIP 編輯器](https://mason276752.github.io/zipeditor/) 勾選音檔（或在預覽裡）按「音檔變速」，檔案會傳過來（`{type:'files'}`）
-- 這裡按「傳到 ZIP 編輯器」，結果打包成 ZIP 傳回去（`{type:'zip'}`），可以合併到目前的資料夾
+- 從 ZIP 編輯器傳來的音檔記得來源：每做出一個結果就自動傳回（`{type:'update'}`），放在 ZIP 裡原檔旁邊；每個結果（不同速度、不同剪輯範圍）都是新檔，不會互相取代
+- 這裡按「傳到 ZIP 編輯器」，把全部結果打包成 ZIP 傳過去（`{type:'zip'}`），可以合併到目前的資料夾（自己加進來的檔案用這個）
 
 對方的分頁沒開的話會自動開新分頁。協定見 [`src/bridge.js`](src/bridge.js)，與 zipeditor、paste2jpg 相同。
 

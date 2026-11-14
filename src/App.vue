@@ -2,11 +2,11 @@
 // 音檔變速：挑一段、調快慢（音高不變）、輸出 WAV。全部在瀏覽器裡做——
 //   * 解碼：瀏覽器內建的 decodeAudioData（mp3／m4a／flac… 播得了的都解得開）
 //   * 變速：rubberband R2 的 Rust 移植編成 WASM，在 Web Worker 裡跑（見 stretch/）
-//   * 串接：ZIP 編輯器可以把音檔傳過來，結果打包成 ZIP 傳回去（見 bridge.js）
+//   * 串接：ZIP 編輯器可以把音檔傳過來，每做出一個結果就自動傳回去；也能手動打包傳過去（見 bridge.js）
 import { computed, markRaw, onBeforeUnmount, onMounted, ref } from 'vue'
 import Icon from './components/Icon.vue'
 import WaveEditor from './components/WaveEditor.vue'
-import { bridgeSupported, listen, sendToEditor } from './bridge.js'
+import { bridgeSupported, listen, sendResult, sendToEditor, toolLabel } from './bridge.js'
 import { makeZip } from './zip.js'
 import { fmtBytes, saveBlob, timeStamp, uniqueName } from './util.js'
 import { encodeWav, extractChannels } from './audio/wav.js'
@@ -44,19 +44,22 @@ const fileInput = ref(null)
 const AUDIO_EXT = /\.(mp3|m4a|m4b|aac|wav|wave|ogg|oga|opus|flac|webm|weba|mp4|m4v|mov|caf|aiff?)$/i
 const isAudio = (f) => /^(audio|video)\//.test(f.type) || AUDIO_EXT.test(f.name)
 
-function addFiles(list, from) {
+// origins[i]：files[i] 從哪個工具來（見 bridge.js），用它做出的結果會自動傳回去。
+function addFiles(list, from, origins = []) {
   const files = [...list]
-  const audio = files.filter(isAudio)
+  const picked = files.map((f, i) => [f, origins[i] ?? null]).filter(([f]) => isAudio(f))
+  const audio = picked.map(([f]) => f)
   if (!audio.length) {
     if (files.length) toast('沒有可以處理的音檔')
     return
   }
-  const added = audio.map((f) => ({ id: crypto.randomUUID(), file: markRaw(f), buffer: null, error: '', loading: null }))
+  const added = picked.map(([f, origin]) => ({ id: crypto.randomUUID(), file: markRaw(f), origin: origin && markRaw(origin), buffer: null, error: '', loading: null }))
   sources.value.push(...added)
   if (!current.value?.buffer || from) select(added[0].id)
   const skipped = files.length - audio.length
-  const who = from === 'zipeditor' ? '從 ZIP 編輯器收到' : '已加入'
-  toast(`${who} ${audio.length} 個音檔${skipped ? `（略過 ${skipped} 個不是音檔的）` : ''}`)
+  const who = from ? `從${toolLabel(from)}收到` : '已加入'
+  const back = picked.find(([, o]) => o)?.[1]
+  toast(`${who} ${audio.length} 個音檔${skipped ? `（略過 ${skipped} 個不是音檔的）` : ''}${back ? `，做好的結果會自動傳回${toolLabel(back.app)}` : ''}`)
 }
 
 /** 解碼（只做一次）；失敗時把原因記在來源上，回 null。 */
@@ -114,7 +117,7 @@ function setSpeed(v) {
 }
 
 // ---------- 產生 ----------
-const results = ref([]) // { id, name, blob, url, seconds, size }
+const results = ref([]) // { id, name, blob, url, seconds, size, origin, returned }
 const busy = ref('')
 
 async function render(source, range, spd, isTrimmed) {
@@ -138,8 +141,23 @@ async function render(source, range, spd, isTrimmed) {
     url: URL.createObjectURL(blob),
     seconds: channels[0].length / sampleRate,
     size: blob.size,
+    origin: source.origin,
+    returned: '', // '' | 'ok' | 'failed'
   })
+  returnResult(results.value.at(-1))
 }
+
+/** 從別的工具來的音檔：每做出一個結果就傳回來源。每個結果都是新檔，不會互相取代。 */
+async function returnResult(r) {
+  if (!r.origin) return
+  const ok = await sendResult(r.origin, r.id, new File([r.blob], r.name, { type: 'audio/wav' }))
+  r.returned = ok ? 'ok' : 'failed'
+}
+
+const returnNote = (r) =>
+  !r.origin || !r.returned ? ''
+    : r.returned === 'ok' ? ` · 已傳回${toolLabel(r.origin.app)}`
+      : ` · ${toolLabel(r.origin.app)}已關閉，沒傳回`
 
 async function renderCurrent() {
   if (busy.value || !current.value) return
@@ -235,7 +253,7 @@ onMounted(() => {
   window.addEventListener('dragover', onDragOver)
   window.addEventListener('dragleave', onDragLeave)
   window.addEventListener('drop', onDrop)
-  stopListening = listen((files, from) => addFiles(files, from || 'zipeditor'))
+  stopListening = listen((files, from, origins) => addFiles(files, from || 'zipeditor', origins))
 })
 onBeforeUnmount(() => {
   window.removeEventListener('dragenter', onDragEnter)
@@ -342,7 +360,7 @@ onBeforeUnmount(() => {
           <li v-for="r in results" :key="r.id">
             <div class="info">
               <b>{{ r.name }}</b>
-              <span>{{ fmtSeconds(r.seconds) }} · {{ fmtBytes(r.size) }}</span>
+              <span>{{ fmtSeconds(r.seconds) }} · {{ fmtBytes(r.size) }}{{ returnNote(r) }}</span>
             </div>
             <audio :src="r.url" controls preload="metadata"></audio>
             <div class="row-btns">
