@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.DS_Store
+*.local
+stretch/target/
+# 由 `npm run build:wasm` 從 stretch/ 編出來
+src/stretch/stretch.wasm

@@ -1,0 +1,17 @@
+[package]
+name = "stretch"
+description = "音檔變速不變調（rubberband R2 時間伸縮的純 Rust 移植），編成 WASM 給瀏覽器用"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+publish = false
+
+[lib]
+# cdylib：給瀏覽器的 .wasm；rlib：讓 `cargo test` 照常跑。
+crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
